@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StegMP3 (PNG LSB + trailing data)</title>
+  <style>
+    :root{
+      --bg:#0b0e14; --panel:#121827; --panel2:#0f1523; --text:#e6e9ef; --muted:#a7b0c0;
+      --accent:#7aa2f7; --danger:#f7768e; --ok:#9ece6a; --border:#24304a;
+    }
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text);}
+    header{padding:18px 20px; border-bottom:1px solid var(--border); background:linear-gradient(180deg, #0b0e14, #090c12);}
+    header h1{font-size:16px; margin:0; letter-spacing:0.2px;}
+    header p{margin:6px 0 0; color:var(--muted); font-size:13px; line-height:1.35;}
+    main{max-width:1100px; margin:0 auto; padding:18px 20px 40px;}
+    .tabs{display:flex; gap:10px; margin:14px 0 16px;}
+    .tabbtn{background:transparent; color:var(--muted); border:1px solid var(--border); padding:9px 12px; border-radius:10px; cursor:pointer;}
+    .tabbtn.active{color:var(--text); border-color:rgba(122,162,247,.6); box-shadow:0 0 0 3px rgba(122,162,247,.12) inset;}
+    .grid{display:grid; grid-template-columns: 1.05fr 0.95fr; gap:16px; align-items:start;}
+    .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:14px;}
+    .card h2{font-size:14px; margin:0 0 10px;}
+    label{display:block; font-size:12px; color:var(--muted); margin:10px 0 6px;}
+    input[type=file]{width:100%; padding:10px; border-radius:12px; border:1px solid var(--border); background:var(--panel2); color:var(--text);}
+    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+    button{background:var(--accent); color:#09101f; border:0; padding:10px 12px; border-radius:12px; cursor:pointer; font-weight:650;}
+    button.secondary{background:transparent; color:var(--text); border:1px solid var(--border); font-weight:600;}
+    button:disabled{opacity:.55; cursor:not-allowed;}
+    .kv{display:grid; grid-template-columns: 190px 1fr; gap:8px 12px; font-size:12.5px; margin-top:10px;}
+    .k{color:var(--muted);}
+    .v{word-break:break-word;}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, Monaco, monospace; font-size:12px;}
+    .status{margin-top:10px; padding:10px 12px; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,.02); font-size:12.5px; line-height:1.35;}
+    .status.ok{border-color:rgba(158,206,106,.35); background:rgba(158,206,106,.08);} 
+    .status.err{border-color:rgba(247,118,142,.35); background:rgba(247,118,142,.08);} 
+    .previewwrap{display:grid; grid-template-columns: 1fr; gap:10px;}
+    canvas{width:100%; border-radius:12px; border:1px solid var(--border); background:#0a0d15; image-rendering:crisp-edges;}
+    details{margin-top:10px; border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:rgba(255,255,255,.02);} 
+    details summary{cursor:pointer; color:var(--muted); font-size:12px;}
+    .small{font-size:12px; color:var(--muted); line-height:1.35;}
+    .warn{color:#ffd58a;}
+    @media (max-width: 950px){ .grid{grid-template-columns:1fr;} .kv{grid-template-columns: 150px 1fr;} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>StegMP3</h1>
+  </header>
+
+  <main>
+    <div class="tabs">
+      <button class="tabbtn active" id="tabEncode">Encoder</button>
+      <button class="tabbtn" id="tabDecode">Decoder</button>
+    </div>
+
+    <section id="encodePane">
+      <div class="grid">
+        <div class="card">
+          <h2>1) Inputs</h2>
+
+          <label>Cover image (accepted: PNG, BMP, WEBP, JPG/JPEG, TIF/TIFF, GIF; output will always be PNG)</label>
+          <input id="coverFile" type="file" accept="image/png,image/bmp,image/webp,image/jpeg,image/jpg,image/gif,image/tiff" />
+
+          <label>MP3 file (max 10 MB)</label>
+          <input id="mp3File" type="file" accept="audio/mpeg,.mp3" />
+
+          <div class="row" style="margin-top:12px;">
+            <button id="btnEncode" disabled>Encode → Download PNG</button>
+            <button id="btnClearEnc" class="secondary">Clear</button>
+          </div>
+
+          <div id="encStatus" class="status" style="display:none"></div>
+
+          <div class="kv">
+            <div class="k">Output size</div><div class="v"><span class="mono">1920×1080</span> PNG</div>
+            <div class="k">LSB capacity (RGB, 4 bits)</div><div class="v"><span class="mono" id="capBytes2">—</span> bytes</div>
+            <div class="k">Header bytes (in LSB)</div><div class="v"><span class="mono" id="hdrBytes">—</span></div>
+            <div class="k">MP3 bytes in LSB</div><div class="v"><span class="mono" id="lsbUsed">—</span></div>
+            <div class="k">MP3 bytes appended after IEND</div><div class="v"><span class="mono" id="trailUsed">—</span></div>
+            <div class="k">Integrity</div><div class="v">SHA-256 stored in header</div>
+          </div>
+
+        </div>
+
+        <div class="card previewwrap">
+          <h2>2) Preview (final encoded PNG pixels)</h2>
+          <canvas id="preview" width="1920" height="1080"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section id="decodePane" style="display:none;">
+      <div class="grid">
+        <div class="card">
+          <h2>1) Input encoded PNG</h2>
+          <label>Encoded PNG (must be exactly the file produced by this tool, unmodified)</label>
+          <input id="stegPngFile" type="file" accept="image/png" />
+
+          <div class="row" style="margin-top:12px;">
+            <button id="btnDecode" disabled>Decode → Download MP3</button>
+            <button id="btnClearDec" class="secondary">Clear</button>
+          </div>
+
+          <div id="decStatus" class="status" style="display:none"></div>
+
+          <div class="kv">
+            <div class="k">MP3 filename</div><div class="v"><span class="mono" id="outName">—</span></div>
+            <div class="k">MP3 length</div><div class="v"><span class="mono" id="outLen">—</span></div>
+            <div class="k">LSB payload length</div><div class="v"><span class="mono" id="outLsbLen">—</span></div>
+            <div class="k">Trailing payload length</div><div class="v"><span class="mono" id="outTrailLen">—</span></div>
+            <div class="k">SHA-256</div><div class="v"><span class="mono" id="outSha">—</span></div>
+          </div>
+
+        </div>
+
+        <div class="card previewwrap">
+          <h2>2) Loaded PNG</h2>
+          <canvas id="loaded" width="1920" height="1080"></canvas>
+          <div class="small">This shows the pixels used to extract the LSB payload.</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+<script>
+(() => {
+  'use strict';
+
+  // --- Parameters
+  const W = 1920, H = 1080;
+  const CHANNELS = 3; // RGB only
+  const LSB_BITS = 4; // using 4 least-significant bits per channel
+  const LSB_CAPACITY_BYTES = Math.floor((W * H * CHANNELS * LSB_BITS) / 8); // 3,110,400
+
+  // --- Header layout
+  // All stored in the LSB payload at the start.
+  //
+  // magic[8] = "STEGMP3\0"
+  // version u8
+  // flags u8 (reserved)
+  // headerLen u16 (total header bytes including fixed + filename)
+  // mp3Len u32
+  // lsbMp3Len u32
+  // trailLen u32
+  // sha256[32]
+  // nameLen u16
+  // nameBytes[nameLen] (UTF-8)
+  const MAGIC = new TextEncoder().encode('STEGMP3\0'); // 8 bytes
+  const VERSION = 1;
+  // v1 header:
+  // magic[8] = "STEGMP3\0"
+  // version u8
+  // flags u8 (reserved)
+  // headerLen u16 (total header bytes including fixed + filename)
+  // mp3Len u32
+  // lsbMp3Len u32
+  // trailLen u32
+  // sha256[32]
+  // nameLen u16
+  // nameBytes[nameLen] (UTF-8)
+  const FIXED_HEADER_LEN = 8 + 1 + 1 + 2 + 4 + 4 + 4 + 32 + 2;
+
+  // --- DOM
+  const tabEncode = document.getElementById('tabEncode');
+  const tabDecode = document.getElementById('tabDecode');
+  const encodePane = document.getElementById('encodePane');
+  const decodePane = document.getElementById('decodePane');
+
+  const coverFile = document.getElementById('coverFile');
+  const mp3File = document.getElementById('mp3File');
+  const btnEncode = document.getElementById('btnEncode');
+  const btnClearEnc = document.getElementById('btnClearEnc');
+  const encStatus = document.getElementById('encStatus');
+  const preview = document.getElementById('preview');
+  const previewCtx = preview.getContext('2d', { willReadFrequently: true });
+
+  const stegPngFile = document.getElementById('stegPngFile');
+  const btnDecode = document.getElementById('btnDecode');
+  const btnClearDec = document.getElementById('btnClearDec');
+  const decStatus = document.getElementById('decStatus');
+  const loaded = document.getElementById('loaded');
+  const loadedCtx = loaded.getContext('2d', { willReadFrequently: true });
+
+  const capBytes2 = document.getElementById('capBytes2');
+  const hdrBytesEl = document.getElementById('hdrBytes');
+  const lsbUsedEl = document.getElementById('lsbUsed');
+  const trailUsedEl = document.getElementById('trailUsed');
+
+  const outNameEl = document.getElementById('outName');
+  const outLenEl = document.getElementById('outLen');
+  const outLsbLenEl = document.getElementById('outLsbLen');
+  const outTrailLenEl = document.getElementById('outTrailLen');
+  const outShaEl = document.getElementById('outSha');
+
+  capBytes2.textContent = String(LSB_CAPACITY_BYTES);
+
+  // --- Utilities
+  const te = new TextEncoder();
+  const td = new TextDecoder();
+
+  function setStatus(el, msg, kind) {
+    el.style.display = 'block';
+    el.className = 'status ' + (kind || '');
+    el.textContent = msg;
+  }
+
+  function clearStatus(el) {
+    el.style.display = 'none';
+    el.textContent = '';
+    el.className = 'status';
+  }
+
+  function humanBytes(n) {
+    if (n === null || n === undefined) return '—';
+    const u = ['B','KB','MB','GB'];
+    let i=0, x=n;
+    while (x>=1024 && i<u.length-1) { x/=1024; i++; }
+    return `${x.toFixed(i===0?0:2)} ${u[i]} (${n} B)`;
+  }
+
+  function u16be(n){
+    const b = new Uint8Array(2);
+    b[0] = (n >>> 8) & 0xff;
+    b[1] = n & 0xff;
+    return b;
+  }
+  function u32be(n){
+    const b = new Uint8Array(4);
+    b[0] = (n >>> 24) & 0xff;
+    b[1] = (n >>> 16) & 0xff;
+    b[2] = (n >>> 8) & 0xff;
+    b[3] = n & 0xff;
+    return b;
+  }
+  function readU16be(buf, off){ return (buf[off]<<8) | buf[off+1]; }
+  function readU32be(buf, off){ return (buf[off]*2**24) + (buf[off+1]<<16) + (buf[off+2]<<8) + buf[off+3]; }
+
+  async function sha256(bytes) {
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return new Uint8Array(digest);
+  }
+
+  function hex(bytes) {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+
+  function concatBytes(...arrs) {
+    const total = arrs.reduce((s,a)=>s + a.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const a of arrs) { out.set(a, off); off += a.length; }
+    return out;
+  }
+
+  // Extract PNG end offset by locating IEND chunk.
+  function findPngEndOffset(pngBytes) {
+    // Validate signature
+    const sig = [137,80,78,71,13,10,26,10];
+    for (let i=0;i<8;i++) if (pngBytes[i]!==sig[i]) throw new Error('Not a PNG (bad signature).');
+
+    let off = 8;
+    while (off + 12 <= pngBytes.length) {
+      const len = readU32be(pngBytes, off);
+      const type = String.fromCharCode(pngBytes[off+4], pngBytes[off+5], pngBytes[off+6], pngBytes[off+7]);
+      const chunkTotal = 12 + len;
+      if (off + chunkTotal > pngBytes.length) throw new Error('Corrupt PNG (chunk overrun).');
+      if (type === 'IEND') {
+        return off + chunkTotal; // end of PNG proper
+      }
+      off += chunkTotal;
+    }
+    throw new Error('Could not find IEND chunk.');
+  }
+
+  // LSB embed/extract (supports LSB_BITS = 2 or 4; currently set to 4)
+  function embedLSBIntoImageData(imageData, payloadBytes) {
+    const data = imageData.data; // RGBA
+
+    const bitsPerGroup = LSB_BITS;
+    const groupsPerByte = 8 / bitsPerGroup; // 4 for 2-bit, 2 for 4-bit
+    if (!Number.isInteger(groupsPerByte)) throw new Error('LSB_BITS must divide 8.');
+
+    // We'll write into R,G,B only, skipping A.
+    const neededGroups = payloadBytes.length * groupsPerByte;
+    const maxGroups = W * H * 3;
+    if (neededGroups > maxGroups) throw new Error(`LSB payload too large for 1920x1080 RGB ${LSB_BITS}-bit capacity.`);
+
+    let byteIndex = 0;
+    let groupIndex = 0; // within current byte
+
+    function nextGroup() {
+      const b = payloadBytes[byteIndex];
+      const shift = 8 - bitsPerGroup - (groupIndex * bitsPerGroup);
+      const mask = (1 << bitsPerGroup) - 1;
+      const v = (b >>> shift) & mask;
+      groupIndex++;
+      if (groupIndex === groupsPerByte) { groupIndex = 0; byteIndex++; }
+      return v;
+    }
+
+    const clearMask = 0xFF ^ ((1 << bitsPerGroup) - 1);
+
+    let written = 0;
+    for (let pix = 0; pix < W * H && written < neededGroups; pix++) {
+      const base = pix * 4;
+      for (let c = 0; c < 3 && written < neededGroups; c++) {
+        const idx = base + c;
+        const v = nextGroup();
+        data[idx] = (data[idx] & clearMask) | v;
+        written++;
+      }
+    }
+    if (written !== neededGroups) throw new Error('Failed to embed full payload (unexpected).');
+    return imageData;
+  }
+
+  function extractLSBFromImageData(imageData, nBytes) {
+    const data = imageData.data;
+    const out = new Uint8Array(nBytes);
+
+    const bitsPerGroup = LSB_BITS;
+    const groupsPerByte = 8 / bitsPerGroup;
+    if (!Number.isInteger(groupsPerByte)) throw new Error('LSB_BITS must divide 8.');
+
+    const neededGroups = nBytes * groupsPerByte;
+    let groupCount = 0;
+
+    const mask = (1 << bitsPerGroup) - 1;
+
+    let curByte = 0;
+    let groupIndex = 0;
+
+    function pushGroup(v) {
+      const shift = 8 - bitsPerGroup - (groupIndex * bitsPerGroup);
+      curByte |= (v & mask) << shift;
+      groupIndex++;
+      if (groupIndex === groupsPerByte) {
+        out[(groupCount / groupsPerByte) | 0] = curByte;
+        curByte = 0;
+        groupIndex = 0;
+      }
+    }
+
+    for (let pix = 0; pix < W * H && groupCount < neededGroups; pix++) {
+      const base = pix * 4;
+      for (let c = 0; c < 3 && groupCount < neededGroups; c++) {
+        pushGroup(data[base + c] & mask);
+        groupCount++;
+      }
+    }
+    if (groupCount !== neededGroups) throw new Error('Failed to extract requested LSB bytes.');
+    return out;
+  }
+
+  async function loadImageToCanvas(file, ctx) {
+    // Uses createImageBitmap for broad format support.
+    const blobUrl = URL.createObjectURL(file);
+    try {
+      const bmp = await createImageBitmap(file);
+      // Draw into 1920x1080, cover-style (contain without cropping) to keep it simple.
+      // For "as small as possible" output pixels are fixed 1920x1080 anyway.
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0,0,W,H);
+
+      const srcW = bmp.width, srcH = bmp.height;
+      const scale = Math.min(W/srcW, H/srcH);
+      const drawW = Math.round(srcW * scale);
+      const drawH = Math.round(srcH * scale);
+      const dx = Math.floor((W - drawW)/2);
+      const dy = Math.floor((H - drawH)/2);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bmp, dx, dy, drawW, drawH);
+      bmp.close?.();
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  }
+
+  function downloadBytes(bytes, filename, mime) {
+    const blob = new Blob([bytes], { type: mime || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  // --- Tabs
+  tabEncode.addEventListener('click', () => {
+    tabEncode.classList.add('active');
+    tabDecode.classList.remove('active');
+    encodePane.style.display = '';
+    decodePane.style.display = 'none';
+  });
+  tabDecode.addEventListener('click', () => {
+    tabDecode.classList.add('active');
+    tabEncode.classList.remove('active');
+    decodePane.style.display = '';
+    encodePane.style.display = 'none';
+  });
+
+  // --- Encoder state
+  let coverLoaded = false;
+  let mp3Loaded = false;
+  let coverName = null;
+  let mp3Name = null;
+  let mp3Bytes = null;
+
+  function updateEncodeButton() {
+    btnEncode.disabled = !(coverLoaded && mp3Loaded);
+  }
+
+  coverFile.addEventListener('change', async () => {
+    clearStatus(encStatus);
+    coverLoaded = false;
+    coverName = null;
+    updateEncodeButton();
+
+    const f = coverFile.files?.[0];
+    if (!f) return;
+    coverName = f.name;
+    try {
+      await loadImageToCanvas(f, previewCtx);
+      coverLoaded = true;
+      updateEncodeButton();
+      setStatus(encStatus, `Cover loaded: ${f.name} (${f.type || 'unknown'})`, 'ok');
+    } catch (e) {
+      setStatus(encStatus, `Failed to load cover image: ${e.message}`, 'err');
+    }
+  });
+
+  mp3File.addEventListener('change', async () => {
+    clearStatus(encStatus);
+    mp3Loaded = false;
+    mp3Name = null;
+    mp3Bytes = null;
+    hdrBytesEl.textContent = '—';
+    lsbUsedEl.textContent = '—';
+    trailUsedEl.textContent = '—';
+    updateEncodeButton();
+
+    const f = mp3File.files?.[0];
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) {
+      setStatus(encStatus, `MP3 too large: ${humanBytes(f.size)}. Max is 10 MB.`, 'err');
+      return;
+    }
+    mp3Name = f.name;
+    try {
+      const buf = await f.arrayBuffer();
+      mp3Bytes = new Uint8Array(buf);
+      mp3Loaded = true;
+      updateEncodeButton();
+      setStatus(encStatus, `MP3 loaded: ${f.name} (${humanBytes(f.size)})`, 'ok');
+    } catch (e) {
+      setStatus(encStatus, `Failed to read MP3: ${e.message}`, 'err');
+    }
+  });
+
+  btnClearEnc.addEventListener('click', () => {
+    coverFile.value = '';
+    mp3File.value = '';
+    coverLoaded = false;
+    mp3Loaded = false;
+    coverName = null;
+    mp3Name = null;
+    mp3Bytes = null;
+    previewCtx.clearRect(0,0,W,H);
+    hdrBytesEl.textContent = '—';
+    lsbUsedEl.textContent = '—';
+    trailUsedEl.textContent = '—';
+    clearStatus(encStatus);
+    updateEncodeButton();
+  });
+
+  btnEncode.addEventListener('click', async () => {
+    clearStatus(encStatus);
+    try {
+      if (!coverLoaded || !mp3Loaded || !mp3Bytes) throw new Error('Missing inputs.');
+
+      // Start from current canvas pixels
+      const imageData = previewCtx.getImageData(0,0,W,H);
+
+      const nameBytes = te.encode(mp3Name || 'hidden.mp3');
+      if (nameBytes.length > 65535) throw new Error('Filename too long.');
+
+      const mp3Len = mp3Bytes.length;
+      const mp3Hash = await sha256(mp3Bytes);
+
+      // Compute header length
+      const headerLen = FIXED_HEADER_LEN + nameBytes.length;
+      if (headerLen > LSB_CAPACITY_BYTES) throw new Error('Header alone exceeds LSB capacity (unexpected).');
+
+      const maxMp3InLsb = LSB_CAPACITY_BYTES - headerLen;
+      const lsbMp3Len = Math.min(mp3Len, maxMp3InLsb);
+      const trailLen = mp3Len - lsbMp3Len;
+
+      // Build header (v1)
+      const header = concatBytes(
+        MAGIC,
+        new Uint8Array([VERSION]),
+        new Uint8Array([0]),
+        u16be(headerLen),
+        u32be(mp3Len >>> 0),
+        u32be(lsbMp3Len >>> 0),
+        u32be(trailLen >>> 0),
+        mp3Hash,
+        u16be(nameBytes.length),
+        nameBytes
+      );
+      if (header.length !== headerLen) throw new Error('Header length mismatch.');
+
+      // Payload that goes into LSB: header + first chunk of MP3
+      const lsbPayload = concatBytes(header, mp3Bytes.slice(0, lsbMp3Len));
+      if (lsbPayload.length > LSB_CAPACITY_BYTES) throw new Error('LSB payload exceeds capacity.');
+
+      // Embed into pixels
+      embedLSBIntoImageData(imageData, lsbPayload);
+      previewCtx.putImageData(imageData, 0, 0);
+
+      // Encode as PNG bytes
+      const pngBlob = await new Promise((resolve, reject) => {
+        preview.toBlob((b) => b ? resolve(b) : reject(new Error('Failed to encode PNG.')), 'image/png');
+      });
+      const pngBuf = await pngBlob.arrayBuffer();
+      const pngBytes = new Uint8Array(pngBuf);
+
+      // Append remainder of MP3 after IEND
+      const trailing = mp3Bytes.slice(lsbMp3Len);
+      const outBytes = trailing.length ? concatBytes(pngBytes, trailing) : pngBytes;
+
+      // Update UI
+      hdrBytesEl.textContent = `${headerLen} (${humanBytes(headerLen)})`;
+      lsbUsedEl.textContent = `${lsbMp3Len} (${humanBytes(lsbMp3Len)})`;
+      trailUsedEl.textContent = `${trailLen} (${humanBytes(trailLen)})`;
+
+      const outName = (coverName ? coverName.replace(/\.[^.]+$/, '') : 'steg') + '.steg.png';
+      downloadBytes(outBytes, outName, 'image/png');
+
+      setStatus(encStatus,
+        `Done. Embedded ${humanBytes(lsbMp3Len)} in LSB + appended ${humanBytes(trailLen)} after IEND. Output: ${outName}`, 
+        'ok'
+      );
+    } catch (e) {
+      setStatus(encStatus, e.message || String(e), 'err');
+    }
+  });
+
+  // --- Decoder
+  function updateDecodeButton(){ btnDecode.disabled = !stegPngFile.files?.[0]; }
+  stegPngFile.addEventListener('change', () => { clearStatus(decStatus); updateDecodeButton(); });
+
+  btnClearDec.addEventListener('click', () => {
+    stegPngFile.value = '';
+    updateDecodeButton();
+    clearStatus(decStatus);
+    loadedCtx.clearRect(0,0,W,H);
+    outNameEl.textContent = '—';
+    outLenEl.textContent = '—';
+    outLsbLenEl.textContent = '—';
+    outTrailLenEl.textContent = '—';
+    outShaEl.textContent = '—';
+  });
+
+  btnDecode.addEventListener('click', async () => {
+    clearStatus(decStatus);
+    try {
+      const f = stegPngFile.files?.[0];
+      if (!f) throw new Error('Pick an encoded PNG first.');
+      const buf = await f.arrayBuffer();
+      const allBytes = new Uint8Array(buf);
+
+      const endOff = findPngEndOffset(allBytes);
+      const pngOnly = allBytes.slice(0, endOff);
+      const trailing = allBytes.slice(endOff);
+
+      // Load PNG pixels into canvas
+      await loadImageToCanvas(new File([pngOnly], 'inner.png', { type: 'image/png' }), loadedCtx);
+      const imageData = loadedCtx.getImageData(0,0,W,H);
+
+      // Read minimal header first
+      // Read minimal header first
+      const minHdr = extractLSBFromImageData(imageData, FIXED_HEADER_LEN);
+      for (let i=0;i<8;i++) if (minHdr[i] !== MAGIC[i]) throw new Error('Magic mismatch. Not a StegMP3 file.');
+      const ver = minHdr[8];
+      if (ver !== VERSION) throw new Error(`Unsupported version: ${ver}`);
+      const headerLen = readU16be(minHdr, 10);
+      if (headerLen < FIXED_HEADER_LEN || headerLen > LSB_CAPACITY_BYTES) throw new Error('Invalid headerLen.');
+
+      // Now read full header
+      const header = extractLSBFromImageData(imageData, headerLen);
+      const mp3Len = readU32be(header, 12);
+      const lsbMp3Len = readU32be(header, 16);
+      const trailLen = readU32be(header, 20);
+      const storedSha = header.slice(24, 56);
+      const nameLen = readU16be(header, 56);
+      const nameStart = FIXED_HEADER_LEN;
+      const nameEnd = nameStart + nameLen;
+      if (nameEnd !== headerLen) throw new Error('Header filename length mismatch.');
+      const name = td.decode(header.slice(nameStart, nameEnd)) || 'recovered.mp3';
+
+      // Sanity checks
+      if (lsbMp3Len > (LSB_CAPACITY_BYTES - headerLen)) throw new Error('Invalid lsbMp3Len (exceeds capacity).');
+      if (lsbMp3Len + trailLen !== mp3Len) throw new Error('Length mismatch: lsbMp3Len + trailLen != mp3Len.');
+      if (trailing.length < trailLen) throw new Error(`Trailing data too short. Expected ${trailLen} bytes, got ${trailing.length}.`);
+
+      // Extract MP3 segment stored in LSB right after header
+      const lsbTotalToRead = headerLen + lsbMp3Len;
+      const lsbAll = extractLSBFromImageData(imageData, lsbTotalToRead);
+      const lsbMp3 = lsbAll.slice(headerLen);
+
+      // Combine with trailing remainder
+      const mp3 = concatBytes(lsbMp3, trailing.slice(0, trailLen));
+      if (mp3.length !== mp3Len) throw new Error('Reconstructed MP3 length mismatch.');
+
+      // Verify hash
+      const gotSha = await sha256(mp3);
+      if (hex(gotSha) !== hex(storedSha)) throw new Error('SHA-256 verification failed. The PNG was modified or corrupted.');
+
+      // Update UI
+      outNameEl.textContent = name;
+      outLenEl.textContent = humanBytes(mp3Len);
+      outLsbLenEl.textContent = humanBytes(lsbMp3Len);
+      outTrailLenEl.textContent = humanBytes(trailLen);
+      outShaEl.textContent = hex(storedSha);
+
+      downloadBytes(mp3, name, 'audio/mpeg');
+      setStatus(decStatus, `Done. Recovered ${humanBytes(mp3Len)} as “${name}” (SHA-256 verified).`, 'ok');
+
+    } catch (e) {
+      setStatus(decStatus, e.message || String(e), 'err');
+    }
+  });
+
+  updateEncodeButton();
+  updateDecodeButton();
+
+})();
+</script>
+</body>
+</html>
